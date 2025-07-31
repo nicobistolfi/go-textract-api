@@ -1,3 +1,30 @@
+// Go Textract API
+//
+// A Golang HTTP API for extracting text from documents and images using AWS Textract.
+// Features API key authentication and designed for serverless deployment on AWS Lambda.
+//
+// Supported file formats:
+// - PDF documents (multi-page, up to 10 pages per file)
+// - Images: PNG, JPEG/JPG, TIFF (single page)
+//
+// The API uses MIME type detection for accurate file type identification and supports
+// concurrent processing of multiple files in a single request.
+//
+//	@title						Go Textract API
+//	@version					1.0
+//	@description				A Golang HTTP API for extracting text from documents and images using AWS Textract, featuring API key authentication and designed for serverless deployment on AWS Lambda.
+//	@termsOfService				http://swagger.io/terms/
+//	@contact.name				API Support
+//	@contact.url				https://github.com/nicobistolfi/go-textract-api
+//	@license.name				MIT
+//	@license.url				https://opensource.org/licenses/MIT
+//	@host						localhost:8080
+//	@BasePath					/
+//	@schemes					http https
+//	@securityDefinitions.apikey	ApiKeyAuth
+//	@in							header
+//	@name						X-API-Key
+//	@description				API key authentication via X-API-Key header
 package main
 
 import (

@@ -75,7 +75,20 @@ type fileJob struct {
 	index      int
 }
 
-// TextractHandler handles text extraction requests for PDFs and images using AWS Textract
+// TextractHandler godoc
+// @Summary Extract text from documents and images
+// @Description Extract text from PDF documents and images (PNG, JPEG, TIFF) using AWS Textract. Supports multiple files in a single request with concurrent processing.
+// @Tags textract
+// @Accept multipart/form-data
+// @Produce json
+// @Param files formData file true "Files to process (PDFs or images)" collectionFormat(multi)
+// @Param X-API-Key header string true "API key for authentication"
+// @Success 200 {object} TextractResponse "Successfully processed files"
+// @Failure 400 {object} ErrorResponse "Bad request - no files provided or invalid request format"
+// @Failure 401 {object} ErrorResponse "Unauthorized - missing or invalid API key"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /extract [post]
+// @Security ApiKeyAuth
 func TextractHandler(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Text extraction request started",
 		"method", r.Method,

@@ -10,6 +10,15 @@ type HealthResponse struct {
 	Status string `json:"status"`
 }
 
+// HealthHandler godoc
+// @Summary Health check endpoint
+// @Description Get health status of the API service
+// @Tags health
+// @Accept json
+// @Produce json
+// @Success 200 {object} HealthResponse
+// @Failure 405 {string} string "Method not allowed"
+// @Router /health [get]
 func HealthHandler(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Health check request",
 		"method", r.Method,
