@@ -75,7 +75,20 @@ type fileJob struct {
 	index      int
 }
 
-// TextractHandler handles text extraction requests for PDFs and images using AWS Textract
+// TextractHandler godoc
+// @Summary Extract text from documents and images
+// @Description Extract text from PDF documents and images (PNG, JPEG, TIFF) using AWS Textract. Supports multiple files in a single request with concurrent processing.
+// @Tags textract
+// @Accept multipart/form-data
+// @Produce json
+// @Param files formData file true "Files to process (PDFs or images)"
+// @Param X-API-Key header string true "API key for authentication"
+// @Success 200 {object} TextractResponse "Successfully processed files"
+// @Failure 400 {object} ErrorResponse "Bad request - no files provided or invalid request format"
+// @Failure 401 {object} ErrorResponse "Unauthorized - missing or invalid API key"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /extract [post]
+// @Security ApiKeyAuth
 func TextractHandler(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Text extraction request started",
 		"method", r.Method,
@@ -189,6 +202,18 @@ func TextractHandler(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Text extraction completed successfully",
 		"total_files", len(cleanResults),
 		"remote_addr", r.RemoteAddr)
+
+	// Log response details in development environment
+	if os.Getenv("ENV") == "development" || os.Getenv("ENV") == "dev" || os.Getenv("DEBUG") == "true" {
+		responseJSON, err := json.MarshalIndent(response, "", "  ")
+		if err != nil {
+			slog.Warn("Failed to marshal response for logging", "error", err)
+		} else {
+			slog.Info("Response details",
+				"response", string(responseJSON),
+				"files_processed", len(cleanResults))
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -616,6 +641,22 @@ func processFile(ctx context.Context, client *textract.Client, fileHeader *multi
 		"file_type", fileType,
 		"total_pages", result.TotalPages,
 		"remote_addr", remoteAddr)
+
+	// Log detailed file result in development environment
+	if os.Getenv("ENV") == "development" || os.Getenv("ENV") == "dev" || os.Getenv("DEBUG") == "true" {
+		// Log first 500 characters of extracted text for each page (for debugging)
+		for _, page := range result.Pages {
+			textPreview := page.Text
+			if len(textPreview) > 500 {
+				textPreview = textPreview[:500] + "..."
+			}
+			slog.Debug("Page content preview",
+				"filename", fileHeader.Filename,
+				"page_number", page.PageNumber,
+				"text_preview", textPreview,
+				"text_length", len(page.Text))
+		}
+	}
 
 	return result
 }
