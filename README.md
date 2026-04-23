@@ -17,7 +17,7 @@ A Golang HTTP API for extracting text from documents and images using AWS Textra
 - ✅ Graceful shutdown support
 - ✅ Request logging middleware
 - ✅ Comprehensive unit and integration tests
-- ✅ AWS Lambda deployment ready with Serverless Framework
+- ✅ AWS Lambda deployment ready via CloudFormation
 - ✅ Dual deployment: Run locally as HTTP server or deploy to AWS Lambda
 
 ## Project Structure
@@ -44,7 +44,8 @@ A Golang HTTP API for extracting text from documents and images using AWS Textra
 ├── tests/
 │   ├── e2e_test.go           # End-to-end integration tests
 │   └── data/                 # Test data files (PDFs, images)
-├── serverless.yml            # Serverless Framework configuration
+├── cloudformation/
+│   └── template.yml          # CloudFormation deployment template
 ├── Taskfile.yml              # Task runner configuration
 ├── .air.toml                 # Hot reload configuration
 ├── Dockerfile                # Docker configuration
@@ -60,8 +61,7 @@ A Golang HTTP API for extracting text from documents and images using AWS Textra
 - Go 1.21 or higher
 - Git
 - [Task](https://taskfile.dev) - Task runner (recommended)
-- (Optional) Serverless Framework for deployment
-- (Optional) AWS CLI configured with appropriate credentials
+- AWS CLI v2 configured with credentials (required for deployment)
 - (Optional) Docker for containerized deployment
 
 ### Installation
@@ -138,6 +138,8 @@ The application uses the following environment variables:
 | `AWS_REGION` | AWS region for Textract service | - | Yes (for text extraction) |
 | `AWS_ACCESS_KEY_ID` | AWS access key ID | - | Yes (unless using IAM roles) |
 | `AWS_SECRET_ACCESS_KEY` | AWS secret access key | - | Yes (unless using IAM roles) |
+| `ENV` | Environment (development/dev for debug logging) | `production` | No |
+| `DEBUG` | Enable debug logging (set to "true") | `false` | No |
 
 ## Running the Server Locally
 
@@ -249,81 +251,93 @@ go test -coverprofile=coverage.out ./...
 go tool cover -html=coverage.out -o coverage.html
 ```
 
-## Serverless Deployment
+## CloudFormation Deployment
+
+Deployment is handled entirely by AWS CloudFormation — the stack definition lives in `cloudformation/template.yml` and creates:
+
+- A Lambda function (`provided.al2` runtime, x86_64, 512 MB, 15s timeout)
+- An IAM role granting CloudWatch Logs and `textract:DetectDocumentText`
+- A CloudWatch log group with 14-day retention
+- An API Gateway v2 HTTP API with a `$default` route integrated with the Lambda
 
 ### Prerequisites
 
-1. Install Serverless Framework:
-```bash
-npm install -g serverless
-```
-
-2. Install dependencies:
-```bash
-npm install
-```
-
-3. Configure AWS credentials:
+1. AWS CLI v2 installed and configured:
 ```bash
 aws configure
 ```
 
-### Deployment Steps
+2. A `.env` file (or exported env vars) with at least `API_KEY` set. Optional: `ENV`, `DEBUG`, `STAGE`, `REGION`, `ARTIFACT_BUCKET`.
 
-#### Using Task (Recommended)
-
-Make sure you have a `.env` file with your API_KEY set, or pass it explicitly:
+### Deploy
 
 ```bash
-# Deploy using .env file
+# Deploy using values from .env (defaults: STAGE=dev, REGION=us-west-1)
 task deploy
 
-# Or deploy with explicit API_KEY
-API_KEY="your-api-key" task deploy
+# Override stage / region / artifact bucket
+STAGE=production REGION=us-east-1 task deploy
+ARTIFACT_BUCKET=my-existing-bucket task deploy
 
-# Deploy to specific stage
-STAGE=production task deploy
-
-# View logs
-task logs
+# One-shot with explicit values
+API_KEY="your-api-key" ENV=development DEBUG=true task deploy
 ```
 
-#### Using Serverless directly
+`task deploy` runs `cf:package` then `cf:deploy`:
 
-1. Set your API key as an environment variable:
-```bash
-export API_KEY="your-production-api-key"
-```
+- `cf:package` builds the Lambda binary (`task build:lambda`), zips it into `bootstrap.zip`, ensures an artifact S3 bucket exists (default name: `go-textract-api-artifacts-<account-id>-<region>`), then uses `aws cloudformation package` to upload the zip and rewrite `Code` references.
+- `cf:deploy` runs `aws cloudformation deploy` against stack `go-textract-api-<stage>` with `CAPABILITY_NAMED_IAM`, then prints the stack outputs (including the HTTP API URL).
 
-2. Deploy to AWS:
-```bash
-serverless deploy --stage production --region us-west-1
-```
+### Direct CLI (without Task)
 
-3. Deploy to a specific stage:
 ```bash
-serverless deploy --stage dev
-serverless deploy --stage staging
-serverless deploy --stage production
+# 1. Build + zip
+GOOS=linux GOARCH=amd64 go build -ldflags='-s -w' -o bootstrap ./cmd/lambda
+zip -j bootstrap.zip bootstrap
+
+# 2. Package (uploads the zip to S3)
+aws cloudformation package \
+  --template-file cloudformation/template.yml \
+  --s3-bucket <your-artifact-bucket> \
+  --output-template-file cloudformation/template.packaged.yml \
+  --region us-west-1
+
+# 3. Deploy
+aws cloudformation deploy \
+  --template-file cloudformation/template.packaged.yml \
+  --stack-name go-textract-api-dev \
+  --parameter-overrides Stage=dev ApiKey="$API_KEY" Env=production Debug=false \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --region us-west-1
 ```
 
 ### Viewing Logs
 
-View function logs:
 ```bash
-serverless logs -f api --tail
-# or using Task
-task logs
+task logs                  # tails /aws/lambda/go-textract-api-dev
+STAGE=production task logs
+```
+
+Or directly:
+
+```bash
+aws logs tail /aws/lambda/go-textract-api-dev --follow --region us-west-1
 ```
 
 ### Removing the Deployment
 
-Remove the deployed service:
 ```bash
-serverless remove --stage production
-# or using Task
-STAGE=production serverless remove
+task cf:remove
+STAGE=production task cf:remove
 ```
+
+Or directly:
+
+```bash
+aws cloudformation delete-stack --stack-name go-textract-api-dev --region us-west-1
+```
+
+Note: the artifact S3 bucket is not deleted automatically — remove it manually if you no longer need it.
 
 ## API Documentation
 
@@ -432,6 +446,28 @@ curl -H "X-API-Key: your-api-key" https://your-api-url.com/endpoint
 
 ## Development Guidelines
 
+### Debug Logging
+
+To enable detailed response logging in development:
+
+```bash
+# Using environment variable
+ENV=development task run
+
+# Or using DEBUG flag
+DEBUG=true task run
+
+# Or set both for maximum verbosity
+ENV=development DEBUG=true task run
+```
+
+When debug logging is enabled, the API will:
+- Log the full JSON response from the `/extract` endpoint
+- Show preview of extracted text (first 500 characters per page)
+- Include additional debug information for troubleshooting
+
+**Note**: Debug logging should only be used in development as it may expose sensitive extracted text in logs.
+
 ### Development Tools
 
 Install development dependencies:
@@ -526,9 +562,9 @@ mux.HandleFunc("/api/users", middleware.AuthMiddleware(handlers.UsersHandler))
    - Check that the `X-API-Key` header matches exactly
 
 3. **Deployment issues**
-   - Ensure AWS credentials are configured
-   - Check Serverless Framework version compatibility
-   - Verify the Go version matches the Lambda runtime
+   - Ensure AWS credentials are configured (`aws sts get-caller-identity`)
+   - Confirm the IAM principal can create CloudFormation stacks, Lambda, IAM roles, API Gateway v2, and S3 buckets
+   - Verify the Lambda binary was built for `linux/amd64` (see `task build:lambda`)
 
 ## Contributing
 

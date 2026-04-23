@@ -6,6 +6,7 @@
 *.dylib
 go-lambda-api
 bootstrap
+bootstrap.zip
 
 # Test binary, built with `go test -c`
 *.test
@@ -36,10 +37,8 @@ Thumbs.db
 .env.local
 .env.*.local
 
-# Serverless Framework
-.serverless/
-node_modules/
-package-lock.json
+# CloudFormation packaged artifacts
+cloudformation/template.packaged.yml
 
 # Air temp files
 tmp/
